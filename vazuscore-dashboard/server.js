@@ -3,6 +3,8 @@
 // Créé pour gérer le bot via navigateur
 // ===================================
 
+console.log("CALLBACK_URL =", process.env.CALLBACK_URL);
+
 const express = require('express');
 const session = require('express-session');
 const passport = require('passport');
@@ -259,4 +261,5 @@ app.listen(config.port, () => {
 });
 
 module.exports = app;
+
 
