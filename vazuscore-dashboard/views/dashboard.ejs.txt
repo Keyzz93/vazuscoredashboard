@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mes Serveurs - VazusCore</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            color: white;
+        }
+
+        .navbar {
+            background: rgba(0, 0, 0, 0.3);
+            backdrop-filter: blur(10px);
+            padding: 20px 40px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        .navbar h1 {
+            font-size: 1.5rem;
+        }
+
+        .user-section {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+
+        .user-avatar {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            border: 2px solid white;
+        }
+
+        .logout-btn {
+            padding: 8px 20px;
+            background: #ED4245;
+            color: white;
+            text-decoration: none;
+            border-radius: 5px;
+            transition: all 0.3s;
+        }
+
+        .logout-btn:hover {
+            background: #C03537;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 40px auto;
+            padding: 0 20px;
+        }
+
+        h2 {
+            font-size: 2rem;
+            margin-bottom: 30px;
+            text-align: center;
+        }
+
+        .guilds-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 30px;
+        }
+
+        .guild-card {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 15px;
+            padding: 30px;
+            text-align: center;
+            transition: all 0.3s;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+        }
+
+        .guild-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.3);
+        }
+
+        .guild-icon {
+            width: 100px;
+            height: 100px;
+            border-radius: 50%;
+            margin-bottom: 20px;
+            border: 3px solid white;
+        }
+
+        .guild-name {
+            font-size: 1.5rem;
+            margin-bottom: 15px;
+            font-weight: bold;
+        }
+
+        .manage-btn {
+            display: inline-block;
+            padding: 12px 30px;
+            background: #5865F2;
+            color: white;
+            text-decoration: none;
+            border-radius: 8px;
+            font-weight: bold;
+            transition: all 0.3s;
+        }
+
+        .manage-btn:hover {
+            background: #4752C4;
+            transform: scale(1.05);
+        }
+
+        .no-guilds {
+            text-align: center;
+            padding: 60px 20px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 15px;
+        }
+
+        .no-guilds h3 {
+            font-size: 1.5rem;
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+    <nav class="navbar">
+        <h1>🤖 VazusCore Dashboard</h1>
+        <div class="user-section">
+            <img src="https://cdn.discordapp.com/avatars/<%= user.id %>/<%= user.avatar %>.png" 
+                 alt="Avatar" class="user-avatar">
+            <span><%= user.username %></span>
+            <a href="/logout" class="logout-btn">Déconnexion</a>
+        </div>
+    </nav>
+
+    <div class="container">
+        <h2>🏰 Mes Serveurs</h2>
+
+        <% if (guilds.length > 0) { %>
+            <div class="guilds-grid">
+                <% guilds.forEach(guild => { %>
+                    <div class="guild-card">
+                        <% if (guild.icon) { %>
+                            <img src="https://cdn.discordapp.com/icons/<%= guild.id %>/<%= guild.icon %>.png" 
+                                 alt="<%= guild.name %>" class="guild-icon">
+                        <% } else { %>
+                            <div class="guild-icon" style="background: #5865F2; display: flex; align-items: center; justify-content: center; font-size: 2rem;">
+                                🏰
+                            </div>
+                        <% } %>
+                        <div class="guild-name"><%= guild.name %></div>
+                        <a href="/dashboard/<%= guild.id %>" class="manage-btn">⚙️ Gérer</a>
+                    </div>
+                <% }); %>
+            </div>
+        <% } else { %>
+            <div class="no-guilds">
+                <h3>😢 Aucun serveur trouvé</h3>
+                <p>Tu dois avoir la permission "Administrateur" sur un serveur où VazusCore est présent.</p>
+            </div>
+        <% } %>
+    </div>
+</body>
+</html>
