@@ -14,7 +14,7 @@ const fs = require('fs');
 const config = {
     clientID: process.env.CLIENT_ID || '1453914738231869542',
     clientSecret: process.env.CLIENT_SECRET || 'dA_KBEmLQtnsc5wzrHWh4nIzqleGF3ff',
-    callbackURL: process.env.CALLBACK_URL || 'http://localhost:3000/callback',
+    callbackURL: process.env.CALLBACK_URL,
     dashboardURL: process.env.DASHBOARD_URL || 'http://localhost:3000',
     port: process.env.PORT || 3000
 };
@@ -259,3 +259,4 @@ app.listen(config.port, () => {
 });
 
 module.exports = app;
+
