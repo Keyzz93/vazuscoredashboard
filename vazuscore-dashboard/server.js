@@ -3,23 +3,57 @@
 // Créé pour gérer le bot via navigateur
 // ===================================
 
-console.log("CALLBACK_URL =", process.env.CALLBACK_URL);
-
 const express = require('express');
 const session = require('express-session');
 const passport = require('passport');
 const DiscordStrategy = require('passport-discord').Strategy;
 const path = require('path');
-const fs = require('fs');
+const mongoose = require('mongoose');
 
 // Configuration
 const config = {
     clientID: process.env.CLIENT_ID || '1453914738231869542',
     clientSecret: process.env.CLIENT_SECRET || 'dA_KBEmLQtnsc5wzrHWh4nIzqleGF3ff',
-    callbackURL: process.env.CALLBACK_URL,
+    callbackURL: process.env.CALLBACK_URL || 'http://localhost:3000/callback',
     dashboardURL: process.env.DASHBOARD_URL || 'http://localhost:3000',
+    mongoURI: process.env.MONGODB_URI,
     port: process.env.PORT || 3000
 };
+
+// Connexion à MongoDB
+if (config.mongoURI) {
+    mongoose.connect(config.mongoURI)
+        .then(() => console.log('✅ MongoDB connecté !'))
+        .catch(err => console.error('❌ Erreur MongoDB:', err));
+}
+
+// Schémas MongoDB
+const userSchema = new mongoose.Schema({
+    guildId: String,
+    userId: String,
+    xp: { type: Number, default: 0 },
+    level: { type: Number, default: 1 },
+    lastXP: { type: Number, default: 0 },
+    money: { type: Number, default: 1000 },
+    bank: { type: Number, default: 0 },
+    lastDaily: { type: Number, default: 0 },
+    lastWork: { type: Number, default: 0 },
+    lastRob: { type: Number, default: 0 }
+});
+
+const guildConfigSchema = new mongoose.Schema({
+    guildId: String,
+    welcomeChannel: String,
+    welcomeMessage: { type: String, default: 'Bienvenue {user} sur **{server}** ! 🎉' },
+    leaveChannel: String,
+    logChannel: String,
+    levelUpMessages: { type: Boolean, default: true },
+    autoRoleId: String,
+    antiLink: { type: Boolean, default: true }
+});
+
+const UserData = mongoose.model('UserData', userSchema);
+const GuildConfig = mongoose.model('GuildConfig', guildConfigSchema);
 
 const app = express();
 
@@ -35,7 +69,7 @@ app.use(session({
     secret: 'vazuscore-secret-key-change-this',
     resave: false,
     saveUninitialized: false,
-    cookie: { maxAge: 86400000 } // 24h
+    cookie: { maxAge: 86400000 }
 }));
 
 // Passport Discord OAuth2
@@ -59,23 +93,6 @@ app.use(passport.session());
 function checkAuth(req, res, next) {
     if (req.isAuthenticated()) return next();
     res.redirect('/login');
-}
-
-// Fonction pour charger les données du bot
-function loadBotData() {
-    try {
-        if (fs.existsSync('./data.json')) {
-            return JSON.parse(fs.readFileSync('./data.json', 'utf8'));
-        }
-    } catch (error) {
-        console.error('Erreur chargement données:', error);
-    }
-    return { userData: {}, warnings: {}, guildConfig: {}, tickets: {}, linkWarnings: {} };
-}
-
-// Fonction pour sauvegarder les données
-function saveBotData(data) {
-    fs.writeFileSync('./data.json', JSON.stringify(data, null, 2));
 }
 
 // ===================================
@@ -110,7 +127,7 @@ app.get('/dashboard', checkAuth, (req, res) => {
 });
 
 // Configuration d'un serveur
-app.get('/dashboard/:guildId', checkAuth, (req, res) => {
+app.get('/dashboard/:guildId', checkAuth, async (req, res) => {
     const guildId = req.params.guildId;
     const userGuilds = req.user.guilds.filter(g => 
         (g.permissions & 0x8) === 0x8 || g.owner
@@ -119,16 +136,18 @@ app.get('/dashboard/:guildId', checkAuth, (req, res) => {
     
     if (!guild) return res.redirect('/dashboard');
     
-    const botData = loadBotData();
-    const guildConfig = botData.guildConfig[guildId] || {
-        welcomeChannel: null,
-        welcomeMessage: 'Bienvenue {user} sur **{server}** ! 🎉',
-        leaveChannel: null,
-        logChannel: null,
-        levelUpMessages: true,
-        autoRoleId: null,
-        antiLink: true
-    };
+    let guildConfig = await GuildConfig.findOne({ guildId });
+    if (!guildConfig) {
+        guildConfig = {
+            welcomeChannel: null,
+            welcomeMessage: 'Bienvenue {user} sur **{server}** ! 🎉',
+            leaveChannel: null,
+            logChannel: null,
+            levelUpMessages: true,
+            autoRoleId: null,
+            antiLink: true
+        };
+    }
     
     res.render('guild', { 
         user: req.user, 
@@ -138,7 +157,7 @@ app.get('/dashboard/:guildId', checkAuth, (req, res) => {
 });
 
 // Sauvegarder la config d'un serveur
-app.post('/api/guild/:guildId/config', checkAuth, (req, res) => {
+app.post('/api/guild/:guildId/config', checkAuth, async (req, res) => {
     const guildId = req.params.guildId;
     const userGuilds = req.user.guilds.filter(g => 
         (g.permissions & 0x8) === 0x8 || g.owner
@@ -147,103 +166,126 @@ app.post('/api/guild/:guildId/config', checkAuth, (req, res) => {
     
     if (!guild) return res.status(403).json({ error: 'Accès refusé' });
     
-    const botData = loadBotData();
-    if (!botData.guildConfig[guildId]) {
-        botData.guildConfig[guildId] = {};
+    try {
+        await GuildConfig.findOneAndUpdate(
+            { guildId },
+            {
+                guildId,
+                welcomeChannel: req.body.welcomeChannel || null,
+                welcomeMessage: req.body.welcomeMessage || 'Bienvenue {user} sur **{server}** ! 🎉',
+                leaveChannel: req.body.leaveChannel || null,
+                logChannel: req.body.logChannel || null,
+                levelUpMessages: req.body.levelUpMessages === 'true',
+                autoRoleId: req.body.autoRoleId || null,
+                antiLink: req.body.antiLink === 'true'
+            },
+            { upsert: true, new: true }
+        );
+        
+        res.json({ success: true, message: 'Configuration sauvegardée !' });
+    } catch (error) {
+        console.error('Erreur sauvegarde config:', error);
+        res.status(500).json({ error: 'Erreur serveur' });
     }
-    
-    // Mettre à jour la config
-    const config = botData.guildConfig[guildId];
-    config.welcomeChannel = req.body.welcomeChannel || null;
-    config.welcomeMessage = req.body.welcomeMessage || 'Bienvenue {user} sur **{server}** ! 🎉';
-    config.leaveChannel = req.body.leaveChannel || null;
-    config.logChannel = req.body.logChannel || null;
-    config.levelUpMessages = req.body.levelUpMessages === 'true';
-    config.autoRoleId = req.body.autoRoleId || null;
-    config.antiLink = req.body.antiLink === 'true';
-    
-    saveBotData(botData);
-    
-    res.json({ success: true, message: 'Configuration sauvegardée !' });
 });
 
 // API - Statistiques d'un serveur
-app.get('/api/guild/:guildId/stats', checkAuth, (req, res) => {
+app.get('/api/guild/:guildId/stats', checkAuth, async (req, res) => {
     const guildId = req.params.guildId;
-    const botData = loadBotData();
     
-    const guildUsers = botData.userData[guildId] || {};
-    const totalUsers = Object.keys(guildUsers).length;
-    const totalXP = Object.values(guildUsers).reduce((sum, u) => sum + u.xp, 0);
-    const totalMoney = Object.values(guildUsers).reduce((sum, u) => sum + u.money + u.bank, 0);
-    
-    const topUsers = Object.entries(guildUsers)
-        .sort(([, a], [, b]) => b.xp - a.xp)
-        .slice(0, 5)
-        .map(([id, data]) => ({
-            id,
-            level: data.level,
-            xp: data.xp,
-            money: data.money + data.bank
-        }));
-    
-    res.json({
-        totalUsers,
-        totalXP,
-        totalMoney,
-        topUsers
-    });
+    try {
+        const users = await UserData.find({ guildId });
+        
+        const totalUsers = users.length;
+        const totalXP = users.reduce((sum, u) => sum + u.xp, 0);
+        const totalMoney = users.reduce((sum, u) => sum + u.money + u.bank, 0);
+        
+        const topUsers = users
+            .sort((a, b) => b.xp - a.xp)
+            .slice(0, 5)
+            .map(u => ({
+                id: u.userId,
+                level: u.level,
+                xp: u.xp,
+                money: u.money + u.bank
+            }));
+        
+        res.json({
+            totalUsers,
+            totalXP,
+            totalMoney,
+            topUsers
+        });
+    } catch (error) {
+        console.error('Erreur stats:', error);
+        res.status(500).json({ error: 'Erreur serveur' });
+    }
 });
 
 // API - Membres d'un serveur
-app.get('/api/guild/:guildId/members', checkAuth, (req, res) => {
+app.get('/api/guild/:guildId/members', checkAuth, async (req, res) => {
     const guildId = req.params.guildId;
-    const botData = loadBotData();
     
-    const guildUsers = botData.userData[guildId] || {};
-    const members = Object.entries(guildUsers).map(([id, data]) => ({
-        id,
-        level: data.level,
-        xp: data.xp,
-        money: data.money,
-        bank: data.bank
-    }));
-    
-    res.json(members);
+    try {
+        const users = await UserData.find({ guildId });
+        
+        const members = users.map(u => ({
+            id: u.userId,
+            level: u.level,
+            xp: u.xp,
+            money: u.money,
+            bank: u.bank
+        }));
+        
+        res.json(members);
+    } catch (error) {
+        console.error('Erreur membres:', error);
+        res.status(500).json({ error: 'Erreur serveur' });
+    }
 });
 
 // API - Gérer l'argent d'un membre
-app.post('/api/guild/:guildId/member/:userId/money', checkAuth, (req, res) => {
+app.post('/api/guild/:guildId/member/:userId/money', checkAuth, async (req, res) => {
     const { guildId, userId } = req.params;
     const { amount } = req.body;
     
-    const botData = loadBotData();
-    if (!botData.userData[guildId] || !botData.userData[guildId][userId]) {
-        return res.status(404).json({ error: 'Utilisateur introuvable' });
+    try {
+        const user = await UserData.findOne({ guildId, userId });
+        if (!user) {
+            return res.status(404).json({ error: 'Utilisateur introuvable' });
+        }
+        
+        user.money = parseInt(amount);
+        await user.save();
+        
+        res.json({ success: true, message: 'Argent modifié !' });
+    } catch (error) {
+        console.error('Erreur modification argent:', error);
+        res.status(500).json({ error: 'Erreur serveur' });
     }
-    
-    botData.userData[guildId][userId].money = parseInt(amount);
-    saveBotData(botData);
-    
-    res.json({ success: true, message: 'Argent modifié !' });
 });
 
 // API - Gérer le niveau d'un membre
-app.post('/api/guild/:guildId/member/:userId/level', checkAuth, (req, res) => {
+app.post('/api/guild/:guildId/member/:userId/level', checkAuth, async (req, res) => {
     const { guildId, userId } = req.params;
     const { level } = req.body;
     
-    const botData = loadBotData();
-    if (!botData.userData[guildId] || !botData.userData[guildId][userId]) {
-        return res.status(404).json({ error: 'Utilisateur introuvable' });
+    try {
+        const user = await UserData.findOne({ guildId, userId });
+        if (!user) {
+            return res.status(404).json({ error: 'Utilisateur introuvable' });
+        }
+        
+        const newLevel = parseInt(level);
+        user.level = newLevel;
+        user.xp = Math.pow(newLevel * 10, 2);
+        await user.save();
+        
+        res.json({ success: true, message: 'Niveau modifié !' });
+    } catch (error) {
+        console.error('Erreur modification niveau:', error);
+        res.status(500).json({ error: 'Erreur serveur' });
     }
-    
-    const newLevel = parseInt(level);
-    botData.userData[guildId][userId].level = newLevel;
-    botData.userData[guildId][userId].xp = Math.pow(newLevel * 10, 2);
-    saveBotData(botData);
-    
-    res.json({ success: true, message: 'Niveau modifié !' });
 });
 
 // ===================================
@@ -256,10 +298,9 @@ app.listen(config.port, () => {
 ║   🌐 VAZUSCORE DASHBOARD WEB        ║
 ║   📡 Port: ${config.port}                     ║
 ║   🔗 URL: ${config.dashboardURL}    ║
+║   💾 MongoDB: ${config.mongoURI ? 'Connecté ✅' : 'Non configuré ❌'} ║
 ╚══════════════════════════════════════╝
     `);
 });
 
 module.exports = app;
-
-
