@@ -1,5 +1,5 @@
 // ===================================
-// VAZUSCORE DASHBOARD WEB
+// VAZUSCORE DASHBOARD WEB AVEC MONGODB
 // Créé pour gérer le bot via navigateur
 // ===================================
 
@@ -8,7 +8,7 @@ const session = require('express-session');
 const passport = require('passport');
 const DiscordStrategy = require('passport-discord').Strategy;
 const path = require('path');
-const fs = require('fs');
+const mongoose = require('mongoose');
 
 // Configuration
 const config = {
@@ -16,10 +16,53 @@ const config = {
     clientSecret: process.env.CLIENT_SECRET || 'dA_KBEmLQtnsc5wzrHWh4nIzqleGF3ff',
     callbackURL: process.env.CALLBACK_URL || 'http://localhost:3000/callback',
     dashboardURL: process.env.DASHBOARD_URL || 'http://localhost:3000',
+    mongoURI: process.env.MONGODB_URI || 'mongodb+srv://lasers880_db_user:7qu5wAbBbn5UN6u1@cluster0.9ix9tqy.mongodb.net/vazuscore?retryWrites=true&w=majority',
     port: process.env.PORT || 3000
 };
 
 const app = express();
+
+// ===================================
+// CONNEXION MONGODB
+// ===================================
+
+mongoose.connect(config.mongoURI)
+    .then(() => console.log('✅ MongoDB connecté (Dashboard) !'))
+    .catch(err => console.error('❌ Erreur MongoDB Dashboard:', err));
+
+// ===================================
+// SCHEMAS MONGODB (identiques au bot)
+// ===================================
+
+const userSchema = new mongoose.Schema({
+    guildId: String,
+    userId: String,
+    xp: { type: Number, default: 0 },
+    level: { type: Number, default: 1 },
+    lastXP: { type: Number, default: 0 },
+    money: { type: Number, default: 1000 },
+    bank: { type: Number, default: 0 },
+    lastDaily: { type: Number, default: 0 },
+    lastWork: { type: Number, default: 0 },
+    lastRob: { type: Number, default: 0 },
+    lastFish: { type: Number, default: 0 },
+    lastMine: { type: Number, default: 0 },
+    lastBeg: { type: Number, default: 0 }
+});
+
+const guildConfigSchema = new mongoose.Schema({
+    guildId: String,
+    welcomeChannel: String,
+    welcomeMessage: { type: String, default: 'Bienvenue {user} sur **{server}** ! 🎉' },
+    leaveChannel: String,
+    logChannel: String,
+    levelUpMessages: { type: Boolean, default: true },
+    autoRoleId: String,
+    antiLink: { type: Boolean, default: true }
+});
+
+const UserData = mongoose.model('UserData', userSchema);
+const GuildConfig = mongoose.model('GuildConfig', guildConfigSchema);
 
 // Middleware
 app.use(express.json());
@@ -59,23 +102,6 @@ function checkAuth(req, res, next) {
     res.redirect('/login');
 }
 
-// Fonction pour charger les données du bot
-function loadBotData() {
-    try {
-        if (fs.existsSync('./data.json')) {
-            return JSON.parse(fs.readFileSync('./data.json', 'utf8'));
-        }
-    } catch (error) {
-        console.error('Erreur chargement données:', error);
-    }
-    return { userData: {}, warnings: {}, guildConfig: {}, tickets: {}, linkWarnings: {} };
-}
-
-// Fonction pour sauvegarder les données
-function saveBotData(data) {
-    fs.writeFileSync('./data.json', JSON.stringify(data, null, 2));
-}
-
 // ===================================
 // ROUTES
 // ===================================
@@ -108,7 +134,7 @@ app.get('/dashboard', checkAuth, (req, res) => {
 });
 
 // Configuration d'un serveur
-app.get('/dashboard/:guildId', checkAuth, (req, res) => {
+app.get('/dashboard/:guildId', checkAuth, async (req, res) => {
     const guildId = req.params.guildId;
     const userGuilds = req.user.guilds.filter(g => 
         (g.permissions & 0x8) === 0x8 || g.owner
@@ -117,16 +143,19 @@ app.get('/dashboard/:guildId', checkAuth, (req, res) => {
     
     if (!guild) return res.redirect('/dashboard');
     
-    const botData = loadBotData();
-    const guildConfig = botData.guildConfig[guildId] || {
-        welcomeChannel: null,
-        welcomeMessage: 'Bienvenue {user} sur **{server}** ! 🎉',
-        leaveChannel: null,
-        logChannel: null,
-        levelUpMessages: true,
-        autoRoleId: null,
-        antiLink: true
-    };
+    // Récupérer la config depuis MongoDB
+    let guildConfig = await GuildConfig.findOne({ guildId });
+    if (!guildConfig) {
+        guildConfig = {
+            welcomeChannel: null,
+            welcomeMessage: 'Bienvenue {user} sur **{server}** ! 🎉',
+            leaveChannel: null,
+            logChannel: null,
+            levelUpMessages: true,
+            autoRoleId: null,
+            antiLink: true
+        };
+    }
     
     res.render('guild', { 
         user: req.user, 
@@ -136,7 +165,7 @@ app.get('/dashboard/:guildId', checkAuth, (req, res) => {
 });
 
 // Sauvegarder la config d'un serveur
-app.post('/api/guild/:guildId/config', checkAuth, (req, res) => {
+app.post('/api/guild/:guildId/config', checkAuth, async (req, res) => {
     const guildId = req.params.guildId;
     const userGuilds = req.user.guilds.filter(g => 
         (g.permissions & 0x8) === 0x8 || g.owner
@@ -145,103 +174,128 @@ app.post('/api/guild/:guildId/config', checkAuth, (req, res) => {
     
     if (!guild) return res.status(403).json({ error: 'Accès refusé' });
     
-    const botData = loadBotData();
-    if (!botData.guildConfig[guildId]) {
-        botData.guildConfig[guildId] = {};
+    // Mettre à jour ou créer la config dans MongoDB
+    let guildConfig = await GuildConfig.findOne({ guildId });
+    if (!guildConfig) {
+        guildConfig = new GuildConfig({ guildId });
     }
     
-    // Mettre à jour la config
-    const config = botData.guildConfig[guildId];
-    config.welcomeChannel = req.body.welcomeChannel || null;
-    config.welcomeMessage = req.body.welcomeMessage || 'Bienvenue {user} sur **{server}** ! 🎉';
-    config.leaveChannel = req.body.leaveChannel || null;
-    config.logChannel = req.body.logChannel || null;
-    config.levelUpMessages = req.body.levelUpMessages === 'true';
-    config.autoRoleId = req.body.autoRoleId || null;
-    config.antiLink = req.body.antiLink === 'true';
+    guildConfig.welcomeChannel = req.body.welcomeChannel || null;
+    guildConfig.welcomeMessage = req.body.welcomeMessage || 'Bienvenue {user} sur **{server}** ! 🎉';
+    guildConfig.leaveChannel = req.body.leaveChannel || null;
+    guildConfig.logChannel = req.body.logChannel || null;
+    guildConfig.levelUpMessages = req.body.levelUpMessages === 'true';
+    guildConfig.autoRoleId = req.body.autoRoleId || null;
+    guildConfig.antiLink = req.body.antiLink === 'true';
     
-    saveBotData(botData);
+    await guildConfig.save();
     
     res.json({ success: true, message: 'Configuration sauvegardée !' });
 });
 
 // API - Statistiques d'un serveur
-app.get('/api/guild/:guildId/stats', checkAuth, (req, res) => {
+app.get('/api/guild/:guildId/stats', checkAuth, async (req, res) => {
     const guildId = req.params.guildId;
-    const botData = loadBotData();
     
-    const guildUsers = botData.userData[guildId] || {};
-    const totalUsers = Object.keys(guildUsers).length;
-    const totalXP = Object.values(guildUsers).reduce((sum, u) => sum + u.xp, 0);
-    const totalMoney = Object.values(guildUsers).reduce((sum, u) => sum + u.money + u.bank, 0);
-    
-    const topUsers = Object.entries(guildUsers)
-        .sort(([, a], [, b]) => b.xp - a.xp)
-        .slice(0, 5)
-        .map(([id, data]) => ({
-            id,
-            level: data.level,
-            xp: data.xp,
-            money: data.money + data.bank
-        }));
-    
-    res.json({
-        totalUsers,
-        totalXP,
-        totalMoney,
-        topUsers
-    });
+    try {
+        // Récupérer tous les utilisateurs du serveur depuis MongoDB
+        const guildUsers = await UserData.find({ guildId });
+        
+        const totalUsers = guildUsers.length;
+        const totalXP = guildUsers.reduce((sum, u) => sum + (u.xp || 0), 0);
+        const totalMoney = guildUsers.reduce((sum, u) => sum + (u.money || 0) + (u.bank || 0), 0);
+        
+        const topUsers = guildUsers
+            .sort((a, b) => (b.xp || 0) - (a.xp || 0))
+            .slice(0, 5)
+            .map(user => ({
+                id: user.userId,
+                level: user.level || 1,
+                xp: user.xp || 0,
+                money: (user.money || 0) + (user.bank || 0)
+            }));
+        
+        res.json({
+            totalUsers,
+            totalXP,
+            totalMoney,
+            topUsers
+        });
+    } catch (error) {
+        console.error('Erreur stats:', error);
+        res.json({
+            totalUsers: 0,
+            totalXP: 0,
+            totalMoney: 0,
+            topUsers: []
+        });
+    }
 });
 
 // API - Membres d'un serveur
-app.get('/api/guild/:guildId/members', checkAuth, (req, res) => {
+app.get('/api/guild/:guildId/members', checkAuth, async (req, res) => {
     const guildId = req.params.guildId;
-    const botData = loadBotData();
     
-    const guildUsers = botData.userData[guildId] || {};
-    const members = Object.entries(guildUsers).map(([id, data]) => ({
-        id,
-        level: data.level,
-        xp: data.xp,
-        money: data.money,
-        bank: data.bank
-    }));
-    
-    res.json(members);
+    try {
+        const guildUsers = await UserData.find({ guildId });
+        
+        const members = guildUsers.map(user => ({
+            id: user.userId,
+            level: user.level || 1,
+            xp: user.xp || 0,
+            money: user.money || 0,
+            bank: user.bank || 0
+        }));
+        
+        res.json(members);
+    } catch (error) {
+        console.error('Erreur membres:', error);
+        res.json([]);
+    }
 });
 
 // API - Gérer l'argent d'un membre
-app.post('/api/guild/:guildId/member/:userId/money', checkAuth, (req, res) => {
+app.post('/api/guild/:guildId/member/:userId/money', checkAuth, async (req, res) => {
     const { guildId, userId } = req.params;
     const { amount } = req.body;
     
-    const botData = loadBotData();
-    if (!botData.userData[guildId] || !botData.userData[guildId][userId]) {
-        return res.status(404).json({ error: 'Utilisateur introuvable' });
+    try {
+        const user = await UserData.findOne({ guildId, userId });
+        if (!user) {
+            return res.status(404).json({ error: 'Utilisateur introuvable' });
+        }
+        
+        user.money = parseInt(amount);
+        await user.save();
+        
+        res.json({ success: true, message: 'Argent modifié !' });
+    } catch (error) {
+        console.error('Erreur modif argent:', error);
+        res.status(500).json({ error: 'Erreur serveur' });
     }
-    
-    botData.userData[guildId][userId].money = parseInt(amount);
-    saveBotData(botData);
-    
-    res.json({ success: true, message: 'Argent modifié !' });
 });
 
 // API - Gérer le niveau d'un membre
-app.post('/api/guild/:guildId/member/:userId/level', checkAuth, (req, res) => {
+app.post('/api/guild/:guildId/member/:userId/level', checkAuth, async (req, res) => {
     const { guildId, userId } = req.params;
     const { level } = req.body;
     
-    const botData = loadBotData();
-    if (!botData.userData[guildId] || !botData.userData[guildId][userId]) {
-        return res.status(404).json({ error: 'Utilisateur introuvable' });
+    try {
+        const user = await UserData.findOne({ guildId, userId });
+        if (!user) {
+            return res.status(404).json({ error: 'Utilisateur introuvable' });
+        }
+        
+        const newLevel = parseInt(level);
+        user.level = newLevel;
+        user.xp = Math.pow(newLevel * 10, 2);
+        await user.save();
+        
+        res.json({ success: true, message: 'Niveau modifié !' });
+    } catch (error) {
+        console.error('Erreur modif niveau:', error);
+        res.status(500).json({ error: 'Erreur serveur' });
     }
-    
-    const newLevel = parseInt(level);
-    botData.userData[guildId][userId].level = newLevel;
-    botData.userData[guildId][userId].xp = Math.pow(newLevel * 10, 2);
-    saveBotData(botData);
-    
-    res.json({ success: true, message: 'Niveau modifié !' });
 });
 
 // ===================================
@@ -254,6 +308,7 @@ app.listen(config.port, () => {
 ║   🌐 VAZUSCORE DASHBOARD WEB        ║
 ║   📡 Port: ${config.port}                     ║
 ║   🔗 URL: ${config.dashboardURL}    ║
+║   💾 MongoDB: Connecté               ║
 ╚══════════════════════════════════════╝
     `);
 });
